@@ -2,6 +2,7 @@
 
 import os
 import re
+import requests
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
 
@@ -24,19 +25,19 @@ def get_transcript(url: str) -> str:
     Fetches the transcript for a YouTube video and returns it as
     a single plain-text string.
 
-    If the PROXY_URL environment variable is set, requests are routed
-    through that proxy — required when running on cloud platforms where
-    YouTube blocks datacenter IPs.
-
-    Set in Streamlit Cloud secrets (or .env locally):
-        PROXY_URL = "http://user:pass@your-proxy-host:port"
+    If PROXY_URL is set in environment/secrets, requests are routed
+    through that proxy — required on cloud platforms where YouTube
+    blocks datacenter IPs.
     """
     video_id = extract_video_id(url)
 
     proxy_url = os.getenv("PROXY_URL")
+
     if proxy_url:
-        proxies = {"http": proxy_url, "https": proxy_url}
-        ytt_api = YouTubeTranscriptApi(proxies=proxies)
+        # youtube-transcript-api 1.2.4 accepts an http_client (requests.Session)
+        session = requests.Session()
+        session.proxies = {"http": proxy_url, "https": proxy_url}
+        ytt_api = YouTubeTranscriptApi(http_client=session)
     else:
         ytt_api = YouTubeTranscriptApi()
 
@@ -50,9 +51,8 @@ def get_transcript(url: str) -> str:
         error_msg = str(e)
         if "IP" in error_msg or "blocked" in error_msg.lower() or "Could not retrieve" in error_msg:
             raise RuntimeError(
-                "YouTube is blocking requests from this server's IP address. "
-                "Set the PROXY_URL secret in Streamlit Cloud settings to route "
-                "through a residential proxy, or run the app locally."
+                "YouTube is blocking requests from this server's IP. "
+                "Update the PROXY_URL secret in Streamlit Cloud settings."
             )
         raise RuntimeError(f"Failed to fetch transcript: {e}")
 
@@ -61,7 +61,6 @@ def get_transcript(url: str) -> str:
 
 
 if __name__ == "__main__":
-    # quick manual test
     test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     text = get_transcript(test_url)
     print(text[:500])
