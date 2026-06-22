@@ -1,5 +1,6 @@
 # Core/loader.py
 
+import os
 import re
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
@@ -22,9 +23,22 @@ def get_transcript(url: str) -> str:
     """
     Fetches the transcript for a YouTube video and returns it as
     a single plain-text string.
+
+    If the PROXY_URL environment variable is set, requests are routed
+    through that proxy — required when running on cloud platforms where
+    YouTube blocks datacenter IPs.
+
+    Set in Streamlit Cloud secrets (or .env locally):
+        PROXY_URL = "http://user:pass@your-proxy-host:port"
     """
     video_id = extract_video_id(url)
-    ytt_api = YouTubeTranscriptApi()
+
+    proxy_url = os.getenv("PROXY_URL")
+    if proxy_url:
+        proxies = {"http": proxy_url, "https": proxy_url}
+        ytt_api = YouTubeTranscriptApi(proxies=proxies)
+    else:
+        ytt_api = YouTubeTranscriptApi()
 
     try:
         fetched = ytt_api.fetch(video_id, languages=["en"])
@@ -32,8 +46,16 @@ def get_transcript(url: str) -> str:
         raise RuntimeError("Transcripts are disabled for this video.")
     except NoTranscriptFound:
         raise RuntimeError("No English transcript found for this video.")
+    except Exception as e:
+        error_msg = str(e)
+        if "IP" in error_msg or "blocked" in error_msg.lower() or "Could not retrieve" in error_msg:
+            raise RuntimeError(
+                "YouTube is blocking requests from this server's IP address. "
+                "Set the PROXY_URL secret in Streamlit Cloud settings to route "
+                "through a residential proxy, or run the app locally."
+            )
+        raise RuntimeError(f"Failed to fetch transcript: {e}")
 
-    # fetched.to_raw_data() -> list of {"text", "start", "duration"} dicts
     full_text = " ".join(snippet["text"] for snippet in fetched.to_raw_data())
     return full_text
 
