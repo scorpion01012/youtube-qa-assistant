@@ -2,16 +2,16 @@
 
 import os
 import re
-import requests
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.proxies import WebshareProxyConfig
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
 
 
 def extract_video_id(url: str) -> str:
     """Pulls the 11-character video ID out of a YouTube URL."""
     patterns = [
-        r"(?:v=|\/)([0-9A-Za-z_-]{11}).*",   # watch?v=... or /embed/...
-        r"youtu\.be\/([0-9A-Za-z_-]{11})",   # youtu.be/...
+        r"(?:v=|\/)([0-9A-Za-z_-]{11}).*",
+        r"youtu\.be\/([0-9A-Za-z_-]{11})",
     ]
     for pattern in patterns:
         match = re.search(pattern, url)
@@ -22,22 +22,24 @@ def extract_video_id(url: str) -> str:
 
 def get_transcript(url: str) -> str:
     """
-    Fetches the transcript for a YouTube video and returns it as
-    a single plain-text string.
+    Fetches the transcript for a YouTube video.
 
-    If PROXY_URL is set in environment/secrets, requests are routed
-    through that proxy — required on cloud platforms where YouTube
-    blocks datacenter IPs.
+    Set these in Streamlit Cloud secrets (or .env locally):
+        WEBSHARE_USERNAME = "pqcldplc"
+        WEBSHARE_PASSWORD = "5bteyedd05gq"
     """
     video_id = extract_video_id(url)
 
-    proxy_url = os.getenv("PROXY_URL")
+    username = os.getenv("WEBSHARE_USERNAME")
+    password = os.getenv("WEBSHARE_PASSWORD")
 
-    if proxy_url:
-        # youtube-transcript-api 1.2.4 accepts an http_client (requests.Session)
-        session = requests.Session()
-        session.proxies = {"http": proxy_url, "https": proxy_url}
-        ytt_api = YouTubeTranscriptApi(http_client=session)
+    if username and password:
+        proxy_config = WebshareProxyConfig(
+            proxy_username=username,
+            proxy_password=password,
+            retries_when_blocked=3,
+        )
+        ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
     else:
         ytt_api = YouTubeTranscriptApi()
 
@@ -48,13 +50,7 @@ def get_transcript(url: str) -> str:
     except NoTranscriptFound:
         raise RuntimeError("No English transcript found for this video.")
     except Exception as e:
-        error_msg = str(e)
-        if "IP" in error_msg or "blocked" in error_msg.lower() or "Could not retrieve" in error_msg:
-            raise RuntimeError(
-                "YouTube is blocking requests from this server's IP. "
-                "Update the PROXY_URL secret in Streamlit Cloud settings."
-            )
-        raise RuntimeError(f"Failed to fetch transcript: {e}")
+        raise RuntimeError(f"Couldn't load transcript: {e}")
 
     full_text = " ".join(snippet["text"] for snippet in fetched.to_raw_data())
     return full_text
