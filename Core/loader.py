@@ -44,11 +44,23 @@ def get_transcript(url: str) -> str:
         ytt_api = YouTubeTranscriptApi()
 
     try:
-        fetched = ytt_api.fetch(video_id, languages=["en"])
+        # Try manual English first, then auto-generated, then any available language
+        try:
+            fetched = ytt_api.fetch(video_id, languages=["en", "en-US", "en-GB"])
+        except NoTranscriptFound:
+            try:
+                fetched = ytt_api.fetch(video_id, languages=["a.en"])
+            except NoTranscriptFound:
+                # Last resort: use whatever language is available
+                transcript_list = ytt_api.list(video_id)
+                available = [t.language_code for t in transcript_list]
+                if not available:
+                    raise RuntimeError("No transcripts available for this video.")
+                fetched = ytt_api.fetch(video_id, languages=available)
     except TranscriptsDisabled:
         raise RuntimeError("Transcripts are disabled for this video.")
-    except NoTranscriptFound:
-        raise RuntimeError("No English transcript found for this video.")
+    except RuntimeError:
+        raise
     except Exception as e:
         raise RuntimeError(f"Couldn't load transcript: {e}")
 
